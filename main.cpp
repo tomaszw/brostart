@@ -8,8 +8,27 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <stdarg.h>
+
+//#define printf log_stuff
+#define printf
 
 using namespace std;
+
+void log_stuff(const char *fmt, ...)
+{
+  char buffer[512] = { 0 };
+  va_list vl;
+  va_start(vl, fmt);
+  vsnprintf(buffer, sizeof(buffer), fmt, vl);
+  va_end(vl);
+
+  FILE *f = fopen("c:\\h\\log-brostart.txt", "a+");
+  if (f) {
+    fputs(buffer, f);
+    fclose(f);
+  };
+}
 
 const CLSID CLSID_ImmersiveShell = {
     0xC2F03A33, 0x21F5, 0x47FA, 0xB4, 0xBB, 0x15, 0x63, 0x62, 0xA2, 0xF2, 0x39};
@@ -42,6 +61,19 @@ struct enum_windows_param {
   vector<HWND> hwnd_all;
 };
 
+string desc_window(HWND hwnd)
+{
+  if (!hwnd)
+    return "[HWND null]";
+
+  char buf[512];
+  char text[256];
+
+  GetWindowTextA(hwnd, text, sizeof(text));
+  sprintf(buf, "[HWND %p] %s", hwnd, text);
+  return string(buf);
+}
+
 BOOL CALLBACK enum_windows_cb(HWND hwnd, LPARAM lp) {
   enum_windows_param *p = (enum_windows_param *)lp;
   char buf[1024];
@@ -53,9 +85,9 @@ BOOL CALLBACK enum_windows_cb(HWND hwnd, LPARAM lp) {
 
   if (p->fw.class_name.size() && p->fw.class_name != cname) return TRUE;
 
+  GetWindowTextA(hwnd, &buf[0], sizeof(buf));
+  string text(buf);
   if (p->fw.title_right.size()) {
-    GetWindowTextA(hwnd, &buf[0], sizeof(buf));
-    string text(buf);
     string pat(p->fw.title_right);
     if (text.size() < pat.size()) return TRUE;
 
@@ -81,12 +113,15 @@ BOOL CALLBACK enum_windows_cb(HWND hwnd, LPARAM lp) {
     lt_window.y = pl.rcNormalPosition.top;
     // HMONITOR mon_window = MonitorFromRect(&pl.rcNormalPosition,
     // MONITOR_DEFAULTTONULL); if (!mon_window)
-    HMONITOR mon_window = MonitorFromPoint(lt_window, MONITOR_DEFAULTTONULL);
+    //HMONITOR mon_window = MonitorFromPoint(lt_window, MONITOR_DEFAULTTONULL);
+    HMONITOR mon_window = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL);
     HMONITOR mon_cursor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONULL);
 
+    //printf("mon_window=%p mon_cursor=%p mon_window2=%p\n", mon_window, mon_cursor, MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL));
     if (!mon_window || !mon_cursor || (mon_window != mon_cursor)) return TRUE;
   }
 
+    printf("TEXT is %s\n", text.c_str());
   if (p->fw.pid) {
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
@@ -279,7 +314,15 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
   findw.pid = 0;
 
   vector<HWND> wnds = search_all(findw);
+  HWND top = 0;
+  if (wnds.size())
+    top = wnds[0];
+
   sort(wnds.begin(), wnds.end());
+  for (int i = 0; i < wnds.size(); i++) {
+    printf("%d: %s\n", i, desc_window(wnds[i]).c_str());
+  }
+
   // if no windows, start browser
   if (wnds.size() == 0) {
     printf("no windows, start app\n");
@@ -287,12 +330,12 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
     return 0;
   }
   // if browser window already in foreground, cycle to next window
-  HWND fore = GetForegroundWindow();
+  HWND fore = top;// GetForegroundWindow();
   for (int i = 0; i < wnds.size(); i++) {
     if (wnds[i] == fore) {
-      printf("cycle app\n");
       // cycle to next window
       HWND hwnd = wnds[(i + 1) % wnds.size()];
+      printf("cycle app from %s to %s\n", desc_window(fore).c_str(), desc_window(hwnd).c_str());
       window_to_front(hwnd);
       return 0;
     }
