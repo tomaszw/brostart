@@ -59,7 +59,7 @@ struct MonitorRect
         return TRUE;
     }
 
-    MonitorRect(HMONITOR hmonitor) : hmonitor(hmonitor)
+    MonitorRect(HMONITOR hmonitor) : hmonitor(hmonitor), found(false)
     {
         SetRectEmpty(&rc);
         EnumDisplayMonitors(0, 0, MonitorEnum, (LPARAM)this);
