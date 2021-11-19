@@ -2,7 +2,10 @@
 #include <shobjidl_core.h>
 #include <stdio.h>
 #include <string>
-
+#include <set>
+#include <algorithm>
+#include <iterator>
+#include <vector>
 
 using namespace std;
 
@@ -24,7 +27,35 @@ struct find_window {
 
 struct enum_windows_param {
   find_window fw;
+  bool find_all;
   HWND hwnd;
+  set<HWND> hwnd_all;
+
+};
+
+struct MonitorRect
+{
+    HMONITOR hmonitor;
+    RECT rc;
+    bool found;
+
+    static BOOL CALLBACK MonitorEnum(HMONITOR hMon,HDC hdc,LPRECT lprcMonitor,LPARAM pData)
+    {
+        MonitorRect* pThis = reinterpret_cast<MonitorRect*>(pData);
+        if (pThis->hmonitor == hMon) {
+          pThis->rc = *lprcMonitor;
+          pThis->found = true;
+          return FALSE;
+        }
+
+        return TRUE;
+    }
+
+    MonitorRect(HMONITOR hmonitor) : hmonitor(hmonitor)
+    {
+        SetRectEmpty(&rc);
+        EnumDisplayMonitors(0, 0, MonitorEnum, (LPARAM)this);
+    }
 };
 
 BOOL CALLBACK enum_windows_cb(HWND hwnd, LPARAM lp)
@@ -70,9 +101,9 @@ BOOL CALLBACK enum_windows_cb(HWND hwnd, LPARAM lp)
     POINT lt_window;
     lt_window.x = pl.rcNormalPosition.left;
     lt_window.y = pl.rcNormalPosition.top;
-    HMONITOR mon_window = MonitorFromRect(&pl.rcNormalPosition, MONITOR_DEFAULTTONULL);
-    if (!mon_window)
-      mon_window = MonitorFromPoint(lt_window, MONITOR_DEFAULTTONULL);
+    //HMONITOR mon_window = MonitorFromRect(&pl.rcNormalPosition, MONITOR_DEFAULTTONULL);
+    //if (!mon_window)
+    HMONITOR mon_window = MonitorFromPoint(lt_window, MONITOR_DEFAULTTONULL);
     HMONITOR mon_cursor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONULL);
 
     if (!mon_window || !mon_cursor || (mon_window != mon_cursor))
@@ -87,8 +118,13 @@ BOOL CALLBACK enum_windows_cb(HWND hwnd, LPARAM lp)
       return TRUE;
   }
   /* found window */
-  p->hwnd = hwnd;
-  return FALSE;
+  if (p->find_all) {
+    p->hwnd_all.insert(hwnd);
+    return TRUE;
+  } else {
+    p->hwnd = hwnd;
+    return FALSE;
+  }
 }
 
 HWND search(struct find_window fw)
@@ -96,10 +132,42 @@ HWND search(struct find_window fw)
   enum_windows_param param;
   param.hwnd = 0;
   param.fw = fw;
+  param.find_all = false;
 
   EnumWindows(enum_windows_cb, (LPARAM) &param);
 
   return param.hwnd;
+}
+
+set<HWND> search_all(struct find_window fw)
+{
+  enum_windows_param param;
+  param.hwnd = 0;
+  param.fw = fw;
+  param.find_all = true;
+
+  EnumWindows(enum_windows_cb, (LPARAM) &param);
+
+  return param.hwnd_all;
+}
+
+static void move_to_current_monitor(HWND hwnd)
+{
+    POINT cursor;
+    GetCursorPos(&cursor);
+
+    HMONITOR mon_cursor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONULL);
+    if (!mon_cursor)
+      return;
+    
+    MonitorRect mrc(mon_cursor);
+    if (mrc.found) {
+      //WINDOWPLACEMENT pl;
+      //pl.length = sizeof(pl);
+      //GetWindowPlacement(hwnd, &pl);
+      //pl.rcNormalPosition = mrc.rc;
+      MoveWindow(hwnd, mrc.rc.left, mrc.rc.top, mrc.rc.right-mrc.rc.left,mrc.rc.bottom-mrc.rc.top, TRUE);
+    }
 }
 
 static void browser_start()
@@ -110,6 +178,15 @@ static void browser_start()
   ZeroMemory( &si, sizeof(si) );
   si.cb = sizeof(si);
   ZeroMemory( &pi, sizeof(pi) );
+
+  find_window fw;
+  fw.class_name = "MozillaWindowClass";
+  fw.title_right = "Mozilla Firefox";
+  fw.on_current_desktop = true;
+  fw.on_current_monitor = false;
+  fw.pid = 0;
+
+  set<HWND> windows_before = search_all(fw);
 
   // Start the child process. 
   if( !CreateProcessA( NULL,   // No module name (use command line)
@@ -128,16 +205,31 @@ static void browser_start()
       return;
   }
 
-  find_window fw;
-  fw.pid = pi.dwProcessId;
+  set<HWND> windows_after;
+  int max_iters = 8;
+  int i = 0;
+  for (;;) {
+    windows_after = search_all(fw);
+    if (windows_after == windows_before) {
+      if (i >= max_iters)
+        break;
+      i++;
+      Sleep(200);
+      continue;
+    }
 
-  //for (;;) {
-    HWND hwnd = search(fw);
-    printf("hwnd=%p\n", hwnd);
-    //if (hwnd)
-      //break;
-    //Sleep(200);
-  //}
+    set<HWND> diff;
+    set_difference(windows_after.begin(), windows_after.end(),
+      windows_before.begin(), windows_before.end(),
+      inserter(diff, diff.end()));
+    
+    if (diff.begin() != diff.end()) {
+      HWND hnew = *diff.begin();
+      //printf("found new window %p\n", hnew);
+      move_to_current_monitor(hnew);
+    }
+    break;
+  }
 }
 
 int main() {
