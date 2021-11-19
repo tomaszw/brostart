@@ -31,6 +31,8 @@ struct find_window {
   DWORD pid;
 };
 
+find_window findw;
+
 struct enum_windows_param {
   find_window fw;
   bool find_all;
@@ -171,11 +173,11 @@ static void move_to_current_monitor(HWND hwnd)
       int w = rc.right - rc.left;
       int h = rc.bottom - rc.top;
 
-      int shrinkw = w/40;
+      int shrinkw = w/8;
       int shrinkh = h/40;
       rc.left += shrinkw;
-      rc.top += shrinkw;
-      rc.right -= shrinkh;
+      rc.top += shrinkh;
+      rc.right -= shrinkw;
       rc.bottom -= shrinkh;
 
       WINDOWPLACEMENT pl;
@@ -185,9 +187,9 @@ static void move_to_current_monitor(HWND hwnd)
       pl.rcNormalPosition = rc;
       pl.ptMaxPosition.x = rc.left;
       pl.ptMaxPosition.y = rc.top;
-      pl.showCmd = SW_SHOWNORMAL;
+      pl.showCmd = SW_SHOWMAXIMIZED;
       SetWindowPlacement(hwnd, &pl);
-      MoveWindow(hwnd, rc.left, rc.top, rc.right-rc.left,rc.bottom-rc.top, TRUE);
+      //MoveWindow(hwnd, rc.left, rc.top, rc.right-rc.left,rc.bottom-rc.top, TRUE);
     }
 }
 
@@ -203,7 +205,7 @@ void window_to_front(HWND hwnd)
   SetForegroundWindow(hwnd);
 }
 
-static void browser_start()
+static void app_start()
 {
   STARTUPINFOW si;
   PROCESS_INFORMATION pi;
@@ -213,8 +215,7 @@ static void browser_start()
   ZeroMemory( &pi, sizeof(pi) );
 
   find_window fw;
-  fw.class_name = window_class;
-  fw.title_right = window_title;
+  fw = findw;
   fw.on_current_desktop = true;
   fw.on_current_monitor = false;
   fw.pid = 0;
@@ -258,7 +259,6 @@ static void browser_start()
     
     if (diff.begin() != diff.end()) {
       HWND hnew = *diff.begin();
-      //printf("found new window %p\n", hnew);
       move_to_current_monitor(hnew);
     }
     break;
@@ -301,18 +301,17 @@ int WinMain(
     exit(1);
   }
 
-  find_window fw;
-  fw.class_name = window_class;
-  fw.title_right = window_title;
-  fw.on_current_desktop = true;
-  fw.on_current_monitor = true;
-  fw.pid = 0;
+  findw.class_name = window_class;
+  findw.title_right = window_title;
+  findw.on_current_desktop = true;
+  findw.on_current_monitor = true;
+  findw.pid = 0;
 
-  vector<HWND> wnds = search_all(fw);
+  vector<HWND> wnds = search_all(findw);
   sort(wnds.begin(), wnds.end());
   // if no windows, start browser
   if (wnds.size() == 0) {
-    browser_start();
+    app_start();
     return 0;
   }
   // if browser window already in foreground, cycle to next window
