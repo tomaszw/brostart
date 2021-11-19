@@ -42,29 +42,6 @@ struct enum_windows_param {
   vector<HWND> hwnd_all;
 };
 
-struct MonitorRect {
-  HMONITOR hmonitor;
-  RECT rc;
-  bool found;
-
-  static BOOL CALLBACK MonitorEnum(HMONITOR hMon, HDC hdc, LPRECT lprcMonitor,
-                                   LPARAM pData) {
-    MonitorRect *pThis = reinterpret_cast<MonitorRect *>(pData);
-    if (pThis->hmonitor == hMon) {
-      pThis->rc = *lprcMonitor;
-      pThis->found = true;
-      return FALSE;
-    }
-
-    return TRUE;
-  }
-
-  MonitorRect(HMONITOR hmonitor) : hmonitor(hmonitor), found(false) {
-    SetRectEmpty(&rc);
-    EnumDisplayMonitors(0, 0, MonitorEnum, (LPARAM)this);
-  }
-};
-
 BOOL CALLBACK enum_windows_cb(HWND hwnd, LPARAM lp) {
   enum_windows_param *p = (enum_windows_param *)lp;
   char buf[1024];
@@ -147,38 +124,39 @@ vector<HWND> search_all(struct find_window fw) {
   return param.hwnd_all;
 }
 
-static void move_to_current_monitor(HWND hwnd) {
-  POINT cursor;
-  GetCursorPos(&cursor);
+static void try_move_to_monitor(HWND hwnd, HMONITOR mon_cursor)
+{
+  MONITORINFO mi;
+  mi.cbSize = sizeof(mi);
 
-  HMONITOR mon_cursor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONULL);
-  if (!mon_cursor) return;
+  GetMonitorInfo(mon_cursor, &mi);
 
-  MonitorRect mrc(mon_cursor);
-  if (mrc.found) {
-    RECT rc = mrc.rc;
-    int w = rc.right - rc.left;
-    int h = rc.bottom - rc.top;
+  RECT rc = mi.rcWork;
+  RECT smallrc = rc;
 
-    int shrinkw = w / 8;
-    int shrinkh = h / 40;
-    rc.left += shrinkw;
-    rc.top += shrinkh;
-    rc.right -= shrinkw;
-    rc.bottom -= shrinkh;
+  int w = rc.right - rc.left;
+  int h = rc.bottom - rc.top;
 
-    WINDOWPLACEMENT pl;
+  int shrinkw = w / 8;
+  int shrinkh = h / 40;
+  smallrc.left += shrinkw;
+  smallrc.top += shrinkh;
+  smallrc.right -= shrinkw;
+  smallrc.bottom -= shrinkh;
 
-    pl.length = sizeof(pl);
-    GetWindowPlacement(hwnd, &pl);
-    pl.rcNormalPosition = rc;
-    pl.ptMaxPosition.x = rc.left;
-    pl.ptMaxPosition.y = rc.top;
-    pl.showCmd = SW_SHOWMAXIMIZED;
-    SetWindowPlacement(hwnd, &pl);
-    // MoveWindow(hwnd, rc.left, rc.top, rc.right-rc.left,rc.bottom-rc.top,
-    // TRUE);
-  }
+  printf("%d %d %d %d\n", rc.left, rc.top, w, h);
+  SetWindowPos(hwnd, 0, rc.left, rc.top, rc.right-rc.left,rc.bottom-rc.top,
+    0);
+  WINDOWPLACEMENT pl;
+  memset(&pl, 0, sizeof(pl));
+  pl.length = sizeof(pl);
+  pl.rcNormalPosition = smallrc;
+  pl.ptMinPosition.x = rc.left;
+  pl.ptMinPosition.y = rc.top;
+  pl.ptMaxPosition.x = rc.left;
+  pl.ptMaxPosition.y = rc.top;
+  pl.showCmd = SW_SHOWMAXIMIZED;
+  SetWindowPlacement(hwnd, &pl);
 }
 
 void window_to_front(HWND hwnd) {
@@ -189,6 +167,18 @@ void window_to_front(HWND hwnd) {
     ShowWindow(hwnd, SW_RESTORE);
   }
   SetForegroundWindow(hwnd);
+}
+
+static void move_to_current_monitor(HWND hwnd)
+{
+  POINT cursor;
+  GetCursorPos(&cursor);
+
+  HMONITOR mon_cursor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONULL);
+  if (!mon_cursor)
+    return;
+
+  try_move_to_monitor(hwnd, mon_cursor);
 }
 
 static void app_start() {
@@ -224,29 +214,28 @@ static void app_start() {
   }
 
   vector<HWND> windows_after;
-  int max_iters = 8;
+  int max_iters = 100;
   int i = 0;
   for (;;) {
     windows_after = search_all(fw);
-    if (windows_after == windows_before) {
-      if (i >= max_iters) break;
-      i++;
-      Sleep(200);
-      continue;
-    }
-
     vector<HWND> diff;
     set_difference(windows_after.begin(), windows_after.end(),
                    windows_before.begin(), windows_before.end(),
                    inserter(diff, diff.end()));
 
-    if (diff.begin() != diff.end()) {
-      HWND hnew = *diff.begin();
-      move_to_current_monitor(hnew);
+    if (!diff.size()) {
+      if (i >= max_iters) break;
+      i++;
+      Sleep(10);
+      continue;
     }
+    HWND hnew = *diff.begin();
+    move_to_current_monitor(hnew);
     break;
   }
 }
+
+//#define CONSOLEAPP
 
 #ifdef CONSOLEAPP
 int main()
@@ -261,9 +250,11 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
 
   if (_argc > 1) {
     browser_path = _argv[1];
-    if (!browser_path)
-      browser_path = L"C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe";
   }
+  if (!browser_path)
+    browser_path = L"C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe";
+  printf("foobar\n");
+  printf("%ls\n", browser_path);
   IServiceProvider *pServiceProvider = NULL;
   CoInitializeEx(NULL, 0);
   HRESULT hr = ::CoCreateInstance(
@@ -291,6 +282,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
   sort(wnds.begin(), wnds.end());
   // if no windows, start browser
   if (wnds.size() == 0) {
+    printf("no windows, start app\n");
     app_start();
     return 0;
   }
@@ -298,6 +290,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
   HWND fore = GetForegroundWindow();
   for (int i = 0; i < wnds.size(); i++) {
     if (wnds[i] == fore) {
+      printf("cycle app\n");
       // cycle to next window
       HWND hwnd = wnds[(i + 1) % wnds.size()];
       window_to_front(hwnd);
@@ -305,6 +298,7 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
     }
   }
   // if browser window not in foreground, bring first one to fg
+  printf("win to front\n");
   window_to_front(wnds[0]);
 
   return 0;
