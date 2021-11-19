@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <shobjidl_core.h>
+#include <shellapi.h>
 #include <stdio.h>
 #include <string>
 #include <set>
@@ -15,6 +16,8 @@ const CLSID CLSID_ImmersiveShell = {
 IVirtualDesktopManager *pDesktopManager = NULL;
 
 static bool browser_shown = false;
+
+wchar_t *browser_path;
 
 struct find_window {
   find_window() : on_current_desktop(false), on_current_monitor(false), pid(0) { }
@@ -162,17 +165,33 @@ static void move_to_current_monitor(HWND hwnd)
     
     MonitorRect mrc(mon_cursor);
     if (mrc.found) {
-      //WINDOWPLACEMENT pl;
-      //pl.length = sizeof(pl);
-      //GetWindowPlacement(hwnd, &pl);
-      //pl.rcNormalPosition = mrc.rc;
-      MoveWindow(hwnd, mrc.rc.left, mrc.rc.top, mrc.rc.right-mrc.rc.left,mrc.rc.bottom-mrc.rc.top, TRUE);
+      RECT rc = mrc.rc;
+      int w = rc.right - rc.left;
+      int h = rc.bottom - rc.top;
+
+      int shrinkw = w/40;
+      int shrinkh = h/40;
+      rc.left += shrinkw;
+      rc.top += shrinkw;
+      rc.right -= shrinkh;
+      rc.bottom -= shrinkh;
+
+      WINDOWPLACEMENT pl;
+
+      pl.length = sizeof(pl);
+      GetWindowPlacement(hwnd, &pl);
+      pl.rcNormalPosition = rc;
+      pl.ptMaxPosition.x = rc.left;
+      pl.ptMaxPosition.y = rc.top;
+      pl.showCmd = SW_SHOWNORMAL;
+      SetWindowPlacement(hwnd, &pl);
+      MoveWindow(hwnd, rc.left, rc.top, rc.right-rc.left,rc.bottom-rc.top, TRUE);
     }
 }
 
 static void browser_start()
 {
-  STARTUPINFO si;
+  STARTUPINFOW si;
   PROCESS_INFORMATION pi;
 
   ZeroMemory( &si, sizeof(si) );
@@ -189,8 +208,8 @@ static void browser_start()
   set<HWND> windows_before = search_all(fw);
 
   // Start the child process. 
-  if( !CreateProcessA( NULL,   // No module name (use command line)
-      "C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe",        // Command line
+  if( !CreateProcessW( NULL,   // No module name (use command line)
+      browser_path,        // Command line
       NULL,           // Process handle not inheritable
       NULL,           // Thread handle not inheritable
       FALSE,          // Set handle inheritance to FALSE
@@ -232,7 +251,26 @@ static void browser_start()
   }
 }
 
-int main() {
+#ifdef CONSOLEAPP
+int main()
+#else
+int WinMain(
+  HINSTANCE hInstance,
+  HINSTANCE hPrevInstance,
+  LPSTR     lpCmdLine,
+  int       nShowCmd
+)
+#endif
+{ 
+  wchar_t **_argv;
+  int _argc;
+  _argv = CommandLineToArgvW(GetCommandLineW(), &_argc);
+
+  if (_argc > 1) {
+    browser_path = _argv[1];
+  if (!browser_path)
+    browser_path = L"C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe";
+  }
   IServiceProvider* pServiceProvider = NULL;
   CoInitializeEx(NULL, 0);
   HRESULT hr = ::CoCreateInstance(
