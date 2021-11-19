@@ -19,6 +19,9 @@ static bool browser_shown = false;
 
 wchar_t *browser_path;
 
+char *window_class = "MozillaWindowClass";
+char *window_title = "Mozilla Firefox";
+
 struct find_window {
   find_window() : on_current_desktop(false), on_current_monitor(false), pid(0) { }
   string class_name;
@@ -32,7 +35,7 @@ struct enum_windows_param {
   find_window fw;
   bool find_all;
   HWND hwnd;
-  set<HWND> hwnd_all;
+  vector<HWND> hwnd_all;
 
 };
 
@@ -113,7 +116,6 @@ BOOL CALLBACK enum_windows_cb(HWND hwnd, LPARAM lp)
       return TRUE;
   }
 
-    //printf("%d\n", (int)pid);
   if (p->fw.pid) {
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
@@ -122,7 +124,7 @@ BOOL CALLBACK enum_windows_cb(HWND hwnd, LPARAM lp)
   }
   /* found window */
   if (p->find_all) {
-    p->hwnd_all.insert(hwnd);
+    p->hwnd_all.push_back(hwnd);
     return TRUE;
   } else {
     p->hwnd = hwnd;
@@ -142,7 +144,7 @@ HWND search(struct find_window fw)
   return param.hwnd;
 }
 
-set<HWND> search_all(struct find_window fw)
+vector<HWND> search_all(struct find_window fw)
 {
   enum_windows_param param;
   param.hwnd = 0;
@@ -189,6 +191,18 @@ static void move_to_current_monitor(HWND hwnd)
     }
 }
 
+void window_to_front(HWND hwnd)
+{
+  WINDOWPLACEMENT pl;
+  pl.length = sizeof(pl);
+  GetWindowPlacement(hwnd, &pl);
+  if (pl.showCmd == SW_SHOWMINIMIZED)
+  {
+    ShowWindow(hwnd, SW_RESTORE);
+  }
+  SetForegroundWindow(hwnd);
+}
+
 static void browser_start()
 {
   STARTUPINFOW si;
@@ -199,13 +213,13 @@ static void browser_start()
   ZeroMemory( &pi, sizeof(pi) );
 
   find_window fw;
-  fw.class_name = "MozillaWindowClass";
-  fw.title_right = "Mozilla Firefox";
+  fw.class_name = window_class;
+  fw.title_right = window_title;
   fw.on_current_desktop = true;
   fw.on_current_monitor = false;
   fw.pid = 0;
 
-  set<HWND> windows_before = search_all(fw);
+  vector<HWND> windows_before = search_all(fw);
 
   // Start the child process. 
   if( !CreateProcessW( NULL,   // No module name (use command line)
@@ -224,7 +238,7 @@ static void browser_start()
       return;
   }
 
-  set<HWND> windows_after;
+  vector<HWND> windows_after;
   int max_iters = 8;
   int i = 0;
   for (;;) {
@@ -237,7 +251,7 @@ static void browser_start()
       continue;
     }
 
-    set<HWND> diff;
+    vector<HWND> diff;
     set_difference(windows_after.begin(), windows_after.end(),
       windows_before.begin(), windows_before.end(),
       inserter(diff, diff.end()));
@@ -288,22 +302,31 @@ int WinMain(
   }
 
   find_window fw;
-  fw.class_name = "MozillaWindowClass";
-  fw.title_right = "Mozilla Firefox";
+  fw.class_name = window_class;
+  fw.title_right = window_title;
   fw.on_current_desktop = true;
   fw.on_current_monitor = true;
   fw.pid = 0;
 
-  HWND hwnd = search(fw);
-  if (hwnd) {
-    WINDOWPLACEMENT pl;
-    pl.length = sizeof(pl);
-    GetWindowPlacement(hwnd, &pl);
-    if (pl.showCmd == SW_SHOWMINIMIZED) {
-      ShowWindow(hwnd, SW_RESTORE);
-    }
-    SetForegroundWindow(hwnd);
-  } else {
+  vector<HWND> wnds = search_all(fw);
+  sort(wnds.begin(), wnds.end());
+  // if no windows, start browser
+  if (wnds.size() == 0) {
     browser_start();
+    return 0;
   }
+  // if browser window already in foreground, cycle to next window
+  HWND fore = GetForegroundWindow();
+  for (int i = 0; i < wnds.size(); i++) {
+    if (wnds[i] == fore) {
+      // cycle to next window
+      HWND hwnd = wnds[(i+1) % wnds.size()];
+      window_to_front(hwnd);
+      return 0;
+    }
+  }
+  // if browser window not in foreground, bring first one to fg
+  window_to_front(wnds[0]);
+
+  return 0;
 }
