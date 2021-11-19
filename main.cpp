@@ -1,7 +1,7 @@
+#include <windows.h>
 #include <shellapi.h>
 #include <shobjidl_core.h>
 #include <stdio.h>
-#include <windows.h>
 
 #include <algorithm>
 #include <iterator>
