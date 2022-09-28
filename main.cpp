@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <shellapi.h>
+#include <shellscalingapi.h>
 #include <shobjidl_core.h>
 #include <stdio.h>
 
@@ -37,7 +38,7 @@ IVirtualDesktopManager *pDesktopManager = NULL;
 
 static bool browser_shown = false;
 
-wchar_t *browser_path;
+wchar_t browser_path[256] = {};
 
 char *window_class = "MozillaWindowClass";
 char *window_title = "Mozilla Firefox";
@@ -117,11 +118,11 @@ BOOL CALLBACK enum_windows_cb(HWND hwnd, LPARAM lp) {
     HMONITOR mon_window = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL);
     HMONITOR mon_cursor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONULL);
 
-    //printf("mon_window=%p mon_cursor=%p mon_window2=%p\n", mon_window, mon_cursor, MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL));
+    printf("hwnd=%p mon_window=%p mon_cursor=%p mon_window2=%p\n", hwnd, mon_window, mon_cursor, MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL));
     if (!mon_window || !mon_cursor || (mon_window != mon_cursor)) return TRUE;
   }
 
-    printf("TEXT is %s\n", text.c_str());
+    //printf("TEXT is %s\n", text.c_str());
   if (p->fw.pid) {
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
@@ -172,26 +173,32 @@ static void try_move_to_monitor(HWND hwnd, HMONITOR mon_cursor)
   int w = rc.right - rc.left;
   int h = rc.bottom - rc.top;
 
-  int shrinkw = w / 8;
-  int shrinkh = h / 40;
-  smallrc.left += shrinkw;
-  smallrc.top += shrinkh;
+  int shrinkw = 0;//w / 8;
+  int shrinkh = 0;//h / 40;
+  smallrc.left += shrinkw+1;
+  smallrc.top += shrinkh+1;
   smallrc.right -= shrinkw;
   smallrc.bottom -= shrinkh;
-
+  rc = smallrc;
   printf("%d %d %d %d\n", rc.left, rc.top, w, h);
-  SetWindowPos(hwnd, 0, rc.left, rc.top, rc.right-rc.left,rc.bottom-rc.top,
-    0);
+  Sleep(25);
+#if 1
   WINDOWPLACEMENT pl;
   memset(&pl, 0, sizeof(pl));
   pl.length = sizeof(pl);
+  pl.flags = WPF_ASYNCWINDOWPLACEMENT | WPF_SETMINPOSITION;
   pl.rcNormalPosition = smallrc;
   pl.ptMinPosition.x = rc.left;
   pl.ptMinPosition.y = rc.top;
-  pl.ptMaxPosition.x = rc.left;
-  pl.ptMaxPosition.y = rc.top;
-  pl.showCmd = SW_SHOWMAXIMIZED;
+//  pl.ptMaxPosition.x = rc.left;
+//  pl.ptMaxPosition.y = rc.top;
+  pl.showCmd = SW_SHOWNORMAL;
   SetWindowPlacement(hwnd, &pl);
+#endif  
+  Sleep(25);
+  SetWindowPos(hwnd, 0, rc.left, rc.top, rc.right-rc.left,rc.bottom-rc.top,
+    SWP_ASYNCWINDOWPOS);
+//  Sleep(10);
 }
 
 void window_to_front(HWND hwnd) {
@@ -210,6 +217,7 @@ static void move_to_current_monitor(HWND hwnd)
   GetCursorPos(&cursor);
 
   HMONITOR mon_cursor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONULL);
+  printf("monitor from point%d %d is %p\n", cursor.x, cursor.y, mon_cursor);
   if (!mon_cursor)
     return;
 
@@ -232,9 +240,10 @@ static void app_start() {
 
   vector<HWND> windows_before = search_all(fw);
 
+  printf("ZONK here %ls\n", browser_path);
   // Start the child process.
   if (!CreateProcessW(NULL,          // No module name (use command line)
-                      browser_path,  // Command line
+      browser_path,  // Command line
                       NULL,          // Process handle not inheritable
                       NULL,          // Thread handle not inheritable
                       FALSE,         // Set handle inheritance to FALSE
@@ -248,6 +257,8 @@ static void app_start() {
     return;
   }
 
+  printf("ZONK here 2\n");
+  
   vector<HWND> windows_after;
   int max_iters = 100;
   int i = 0;
@@ -265,9 +276,12 @@ static void app_start() {
       continue;
     }
     HWND hnew = *diff.begin();
+    printf("ZONK hnew is %p, moving\n", hnew);
     move_to_current_monitor(hnew);
     break;
   }
+  printf("ZONK here 3\n");
+  
 }
 
 //#define CONSOLEAPP
@@ -281,15 +295,21 @@ int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
 {
   wchar_t **_argv;
   int _argc;
+  SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
+  printf("yooo\n");
   _argv = CommandLineToArgvW(GetCommandLineW(), &_argc);
 
   if (_argc > 1) {
-    browser_path = _argv[1];
+    wcscpy(browser_path, _argv[1]);
+    printf("argc=%d use path: %ls\n", _argc, browser_path);
   }
-  if (!browser_path)
-    browser_path = L"C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe";
+  
+  if (!browser_path[0]) {
+    printf("use def path\n");
+    wcscpy(browser_path, L"C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe");
+  }
   printf("foobar\n");
-  printf("%ls\n", browser_path);
+  printf("path = <%ls>\n", browser_path);
   IServiceProvider *pServiceProvider = NULL;
   CoInitializeEx(NULL, 0);
   HRESULT hr = ::CoCreateInstance(
