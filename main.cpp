@@ -167,38 +167,24 @@ static void try_move_to_monitor(HWND hwnd, HMONITOR mon_cursor)
 
   GetMonitorInfo(mon_cursor, &mi);
 
-  RECT rc = mi.rcWork;
+  RECT rc = mi.rcMonitor;
   RECT smallrc = rc;
 
+  rc.left++;
+  rc.top++;
+//  rc.right--;
+//  rc.bottom--;
   int w = rc.right - rc.left;
   int h = rc.bottom - rc.top;
-
-  int shrinkw = 0;//w / 8;
-  int shrinkh = 0;//h / 40;
-  smallrc.left += shrinkw+1;
-  smallrc.top += shrinkh+1;
-  smallrc.right -= shrinkw;
-  smallrc.bottom -= shrinkh;
-  rc = smallrc;
   printf("%d %d %d %d\n", rc.left, rc.top, w, h);
-  Sleep(25);
-#if 1
-  WINDOWPLACEMENT pl;
-  memset(&pl, 0, sizeof(pl));
-  pl.length = sizeof(pl);
-  pl.flags = WPF_ASYNCWINDOWPLACEMENT | WPF_SETMINPOSITION;
-  pl.rcNormalPosition = smallrc;
-  pl.ptMinPosition.x = rc.left;
-  pl.ptMinPosition.y = rc.top;
-//  pl.ptMaxPosition.x = rc.left;
-//  pl.ptMaxPosition.y = rc.top;
-  pl.showCmd = SW_SHOWNORMAL;
-  SetWindowPlacement(hwnd, &pl);
-#endif  
-  Sleep(25);
-  SetWindowPos(hwnd, 0, rc.left, rc.top, rc.right-rc.left,rc.bottom-rc.top,
-    SWP_ASYNCWINDOWPOS);
-//  Sleep(10);
+
+  LONG styles = GetWindowLong(hwnd, GWL_STYLE);
+  styles &= ~WS_MAXIMIZE;
+  styles &= ~WS_MINIMIZE;
+  
+  SetWindowLong(hwnd, GWL_STYLE, styles);
+
+  SetWindowPos(hwnd, 0, rc.left, rc.top, w, h, 0);
 }
 
 void window_to_front(HWND hwnd) {
